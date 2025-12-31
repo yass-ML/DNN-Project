@@ -1,7 +1,5 @@
 torch
-numpy
-gymnasium
 tqdm
 plyfile
 opencv-python
-matplotlib
+

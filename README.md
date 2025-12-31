@@ -1,21 +1,19 @@
-# 3D Navigation with Gaussian Splatting and Reinforcement Learning
+# 3D Reconstruction for Unity (Gaussian Splatting)
 
 ## Project Overview
-This project aims to create an autonomous navigation system that learns to navigate a 3D environment reconstructed from 2D images.
-It consists of two main components:
-1.  **3D Reconstruction (Gaussian Splatting)**: Takes a set of images (e.g., a street, a hiking trail) and reconstructs a high-fidelity 3D scene using 3D Gaussian Splatting.
-2.  **Navigation (Reinforcement Learning)**: An RL agent is trained to navigate this reconstructed 3D environment from a starting point to a destination.
+This project focuses on creating high-fidelity 3D environments from 2D images using Gaussian Splatting, specifically optimized for export and use within **Unity**.
+
+## Workflow
+1.  **Capture**: Take photos of a scene (street, room, nature trail).
+2.  **Process**: Train a Gaussian Splatting model to reconstruct the scene.
+3.  **Export**: Generate a `.ply` file.
+4.  **Interactive Experience**: Import the model into Unity to explore the environment with a playable character.
 
 ## Architecture
 
-### 1. Gaussian Splatting (`src/gaussian_splatting/`)
--   **Pipeline**: Handles the optimization loop of 3D Gaussians.
--   **Scene**: Loads input data (images + COLMAP poses) and initializes the point cloud.
--   **Output**: A `.ply` file representing the 3D scene which allows for real-time rendering.
-
-### 2. RL Navigation (`src/rl_navigation/`)
--   **Environment (`NavigationEnv`)**: A custom Gym environment. It uses the GS pipeline to render observations (RGB images) or provides state vectors to the agent. It defines the reward function (e.g., distance to target, collision avoidance).
--   **Agent**: A generic RL agent (currently a simple Policy Network skeleton) that learns to map observations to movement actions.
+### `src/gaussian_splatting/`
+-   **Pipeline**: Handles the optimization of the 3D Gaussian cloud.
+-   **Output**: Produces a strictly formatted `.ply` file compatible with standard Unity Gaussian Splatting renderers.
 
 ## Installation
 
@@ -25,51 +23,22 @@ It consists of two main components:
     cd DNN-Project
     ```
 
-2.  **Install Dependencies**:
+2.  **Install Python Dependencies**:
     ```bash
     pip install -r requirements.txt
     ```
-    *Note: Gaussian Splatting often requires custom CUDA kernels (diff-gaussian-rasterization). You may need to install those separately from standard submodules repositories.*
 
 ## Usage
 
-### 1. Train Gaussian Splatting Model
-Reconstruct the 3D scene from your image dataset.
+### 1. Training & Export
+Run the training pipeline. This will load your images/colmap data and produce a 3D model.
 ```bash
-python main.py --mode train_gs --source ./data/my_scene
+python main.py --mode train --source ./data/my_scene --output_path ./data/models/scene.ply
 ```
 
-### 2. Train RL Agent
-Train the agent to navigate the reconstructed scene.
-```bash
-python main.py --mode train_rl
-```
-
-### 3. Demo
-Run a visualization of the agent performing in the environment.
-```bash
-python main.py --mode demo
-```
-
-## Project Status & TODOs
-
-### Initial Setup (Done)
-- [x] Project Skeleton Created
-- [x] Core File Structure (`src/`, `data/`)
-- [x] Entry point (`main.py`)
-
-### Gaussian Splatting Module (TODO)
-- [ ] Implement actual `load_colmap` parsing logic in `scene.py`.
-- [ ] Implement `render()` function using rasterization kernels in `pipeline.py`.
-- [ ] Implement loss functions (L1, D-SSIM) in `pipeline.py`.
-
-### RL Navigation Module (TODO)
-- [ ] Connect `NavigationEnv.render()` to the GS renderer to produce image observations.
-- [ ] Switch Agent to a Convolutional Neural Network (CNN) to handle image inputs.
-- [ ] Implement a robust RL algorithm (PPO or SAC) instead of the skeleton policy.
-
-## Workflow Example
-1.  **Capture**: Take 50-100 photos of a generic street path.
-2.  **Process**: Run COLMAP to get sparse structure and positions.
-3.  **Train GS**: Run `train_gs` to get a 3D model.
-4.  **Train RL**: Run `train_rl` to teach the agent to walk from A to B in that model.
+### 2. Import into Unity
+1.  Open your Unity Project.
+2.  Install a Gaussian Splatting renderer package (e.g., [UnityGaussianSplatting](https://github.com/aras-p/UnityGaussianSplatting)).
+3.  Drag and drop the generated `scene.ply` into your Unity Assets folder.
+4.  Create a "Gaussian Splat" object in your scene and assign the asset.
+5.  Add a Character Controller to run around your scanned world!
