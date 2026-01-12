@@ -1,5 +1,17 @@
-torch
-tqdm
-plyfile
-opencv-python
+# 3D Gaussian Splatting for Unity
+#
+# Core dependencies
+torch>=2.0
+torchvision
+numpy
+scipy
 
+# Progress and utilities  
+tqdm
+
+# Image processing
+opencv-python
+Pillow
+
+# PLY file handling
+plyfile
