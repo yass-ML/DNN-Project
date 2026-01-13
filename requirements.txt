@@ -6,6 +6,10 @@ torchvision
 numpy
 scipy
 
+# CUDA-accelerated Gaussian Splatting rasterizer
+gsplat>=1.0.0
+packaging  # Required by gsplat
+
 # Progress and utilities  
 tqdm
 

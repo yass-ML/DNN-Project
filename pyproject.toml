@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "gsplat>=1.5.3",
     "numpy>=2.4.1",
     "opencv-python>=4.11.0.86",
+    "packaging>=25.0",
     "pillow>=12.1.0",
     "plyfile>=1.1.3",
     "scipy>=1.17.0",
