@@ -206,7 +206,7 @@ class GaussianModel(nn.Module):
             viewspace_point_tensor: Projected 2D points with gradients
             radii: 2D radii of Gaussians (can be [N] or [N, 2] or [1, N] or [1, N, 2])
             absgrad: Optional pre-computed absolute gradients from gsplat
-                     (when using gsplat with absgrad=True)
+                    (when using gsplat with absgrad=True)
         """
         # Handle radii shape - gsplat may return [N, 2] for x/y radii
         # We need a single value per Gaussian for max_radii2D tracking
@@ -215,6 +215,9 @@ class GaussianModel(nn.Module):
         if radii.dim() == 2:
             radii = radii.max(dim=-1).values  # [N, 2] -> [N], take max of x/y radii
 
+        # Only update stats for visible Gaussians (radii > 0)
+        visible_mask = radii > 0
+
         # Use absgrad if provided (gsplat), otherwise compute from .grad
         if absgrad is not None:
             # gsplat provides absolute gradients directly
@@ -222,21 +225,38 @@ class GaussianModel(nn.Module):
             if absgrad.dim() == 3:
                 absgrad = absgrad.squeeze(0)
             grad_norm = absgrad.norm(dim=-1, keepdim=True)
+            # print(
+            #     f"[DEBUG] absgrad norm - mean: {grad_norm.mean().item():.8f}, max: {grad_norm.max().item():.8f}"
+            # )
+
         elif viewspace_point_tensor.grad is not None:
             # Legacy: compute from gradient tensor
             grad = viewspace_point_tensor.grad[:, :2]
             grad_norm = torch.norm(grad, dim=-1, keepdim=True)
-        else:
-            return  # No gradients available
+            # print(
+            #     f"[DEBUG] viewspace grad norm - mean: {grad_norm.mean().item():.8f}, max: {grad_norm.max().item():.8f}"
+            # )
 
-        self.xyz_gradient_accum += grad_norm
-        self.denom += 1
+        else:
+            # print("[DEBUG] No gradients available!")
+            return
+
+        # Only accumulate for visible Gaussians
+        visible_mask_expanded = visible_mask.unsqueeze(-1)  # [N, 1] for broadcasting
+        self.xyz_gradient_accum[visible_mask] += grad_norm[visible_mask]
+        self.denom[visible_mask] += 1
+
+        # Update max radii for visible Gaussians
         self.max_radii2D = torch.max(self.max_radii2D, radii)
+
+        # Debug: log visibility stats
+        # num_visible = visible_mask.sum().item()
+        # print(f"[DEBUG] Visible Gaussians: {num_visible}/{len(radii)}")
 
     def densify_and_prune(
         self,
-        grad_threshold: float = 0.0002,
-        min_opacity: float = 0.005,
+        grad_threshold: float = 0.00002,
+        min_opacity: float = 0.01,
         extent: float = 1.0,
         max_screen_size: float = 20.0,
     ):
@@ -250,34 +270,128 @@ class GaussianModel(nn.Module):
             max_screen_size: Maximum 2D size before pruning
         """
         if self.denom is None or self.xyz_gradient_accum is None:
+            print("WARNING: Densification stats not initialized")
             return
+
+        if self.num_gaussians == 0:
+            print("Warning: No Gaussians to densify/prune!")
+            return
+
+        # Log initial state
+        initial_count = self.num_gaussians
+        print(f"\n{'=' * 60}")
+        print(f"DENSIFY_AND_PRUNE - Initial: {initial_count} Gaussians")
+        print(f"{'=' * 60}")
 
         # Compute average gradient
         grads = self.xyz_gradient_accum / (self.denom + 1e-7)
         grads[grads.isnan()] = 0.0
+        print(f"Mean denom: {self.denom.mean().item():.2f}")
+        print(f"Mean xyz gradient: {self.xyz_gradient_accum.mean().item():.6f}")
+
+        # Log gradient statistics
+        grad_mean = grads.mean().item()
+        grad_max = grads.max().item()
+        grad_min = grads.min().item()
+        print(
+            f"Gradient stats: mean={grad_mean:.6f}, max={grad_max:.6f}, min={grad_min:.6f}"
+        )
+        print(f"Gradient threshold: {grad_threshold}")
 
         # Find Gaussians to densify (high gradient)
         selected = grads.squeeze() >= grad_threshold
 
+        # Statistics on selected Gaussians
+        num_selected = selected.sum().item()
+        print(f"To densify (high gradient): {num_selected}")
+
         # Split large Gaussians
         scales = self.scaling
         max_scale = scales.max(dim=-1).values
-        large_mask = max_scale > extent * 0.01
+        scale_threshold = extent * 0.01
+        large_mask = max_scale > scale_threshold
         split_mask = selected & large_mask
 
         # Clone small Gaussians
         clone_mask = selected & ~large_mask
 
-        # Perform densification
+        num_to_split = split_mask.sum().item()
+        num_to_clone = clone_mask.sum().item()
+        print(f"Scale threshold: {scale_threshold:.6f}")
+        print(f"To split (large): {num_to_split}")
+        print(f"To clone (small): {num_to_clone}")
+
+        # Get indices to split BEFORE cloning (indices won't change for original Gaussians)
+        split_indices = torch.where(split_mask)[0]
+
+        # Perform densification - CLONE FIRST
+        count_before_clone = self.num_gaussians
         self._densify_and_clone(clone_mask)
-        self._densify_and_split(split_mask)
+        count_after_clone = self.num_gaussians
+        cloned_added = count_after_clone - count_before_clone
+        print(f"After clone: {count_after_clone} (+{cloned_added})")
+
+        # Rebuild split_mask for the new tensor size using saved indices
+        # The original Gaussians are still at the same indices (new ones are appended)
+        split_mask_updated = torch.zeros(
+            self.num_gaussians, dtype=torch.bool, device=self.device
+        )
+        split_mask_updated[split_indices] = True
+
+        count_before_split = self.num_gaussians
+        self._densify_and_split(split_mask_updated)
+        count_after_split = self.num_gaussians
+        split_net_change = count_after_split - count_before_split
+        print(
+            f"After split: {count_after_split} ({split_net_change:+d}) [splits {num_to_split} into 2 each, then removes originals]"
+        )
 
         # Prune
         prune_mask = (self.opacity < min_opacity).squeeze()
-        if self.max_radii2D is not None:
-            prune_mask = prune_mask | (self.max_radii2D > max_screen_size)
 
+        # Debug: count opacity-based pruning
+        opacity_prune_count = prune_mask.sum().item()
+
+        # Log opacity stats
+        opacity_mean = self.opacity.mean().item()
+        opacity_min = self.opacity.min().item()
+        print(
+            f"\nOpacity stats: mean={opacity_mean:.4f}, min={opacity_min:.4f}, threshold={min_opacity}"
+        )
+        print(f"To prune (low opacity): {opacity_prune_count}")
+
+        # Only apply screen size pruning if max_screen_size is positive
+        screen_size_prune_count = 0
+        if self.max_radii2D is not None and max_screen_size > 0:
+            screen_size_mask = self.max_radii2D > max_screen_size
+            screen_size_prune_count = screen_size_mask.sum().item()
+            prune_mask = prune_mask | screen_size_mask
+            max_radius = self.max_radii2D.max().item()
+            print(f"Max 2D radius: {max_radius:.1f}, threshold={max_screen_size}")
+            print(f"To prune (large screen size): {screen_size_prune_count}")
+
+        # Log pruning stats for debugging
+        num_to_prune = prune_mask.sum().item()
+        print(
+            f"Total to prune: {num_to_prune} (opacity: {opacity_prune_count}, screen_size: {screen_size_prune_count})"
+        )
+
+        if num_to_prune > self.num_gaussians * 0.5:
+            print(
+                f"⚠️  WARNING: Pruning {num_to_prune}/{self.num_gaussians} ({100 * num_to_prune / self.num_gaussians:.1f}%)"
+            )
+
+        count_before_prune = self.num_gaussians
         self._prune(prune_mask)
+        count_after_prune = self.num_gaussians
+        pruned = count_before_prune - count_after_prune
+        print(f"After prune: {count_after_prune} (-{pruned})")
+
+        # Final summary
+        final_change = count_after_prune - initial_count
+        print(f"\n{'=' * 60}")
+        print(f"FINAL: {initial_count} → {count_after_prune} ({final_change:+d})")
+        print(f"{'=' * 60}\n")
 
         # Reset stats
         device = self.device
@@ -378,9 +492,31 @@ class GaussianModel(nn.Module):
             torch.cat([self.max_radii2D, torch.zeros(n_new, device=device)], dim=0),
         )
 
-    def _prune(self, mask: torch.Tensor):
-        """Remove Gaussians at mask positions."""
+    def _prune(self, mask: torch.Tensor, min_gaussians: int = 1000):
+        """Remove Gaussians at mask positions.
+
+        Args:
+            mask: Boolean mask of Gaussians to prune
+            min_gaussians: Minimum number of Gaussians to keep (safety threshold)
+        """
         keep = ~mask
+
+        # Safety check: ensure we don't prune all Gaussians
+        num_remaining = keep.sum().item()
+        if num_remaining < min_gaussians:
+            # Limit pruning to keep at least min_gaussians
+            prune_indices = torch.where(mask)[0]
+            num_to_prune = max(0, self.num_gaussians - min_gaussians)
+            if num_to_prune > 0 and len(prune_indices) > 0:
+                # Only prune up to num_to_prune Gaussians
+                prune_indices = prune_indices[:num_to_prune]
+                keep = torch.ones(
+                    self.num_gaussians, dtype=torch.bool, device=self.device
+                )
+                keep[prune_indices] = False
+            else:
+                # Don't prune anything
+                return
 
         self._xyz = nn.Parameter(self._xyz[keep])
         self._features_dc = nn.Parameter(self._features_dc[keep])
@@ -397,7 +533,7 @@ class GaussianModel(nn.Module):
     def reset_opacity(self):
         """Reset opacity to initial value (used periodically during training)."""
         new_opacity = inverse_sigmoid(
-            torch.min(self.opacity, torch.ones_like(self.opacity) * 0.01)
+            torch.min(self.opacity, torch.ones_like(self.opacity) * 0.5)
         )
         self._opacity = nn.Parameter(new_opacity)
 

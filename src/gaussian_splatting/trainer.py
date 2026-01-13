@@ -35,11 +35,12 @@ class TrainingConfig:
         lambda_dssim: float = 0.2,
         densify_from_iter: int = 500,
         densify_until_iter: int = 15000,
-        densify_grad_threshold: float = 0.0002,
+        densify_grad_threshold: float = 0.000002,
         densification_interval: int = 100,
         opacity_reset_interval: int = 3000,
         sh_degree_increase_interval: int = 1000,
-        min_opacity: float = 0.005,
+        min_opacity: float = 0.0001,
+        prune_opacity_from_iter: int = 3000,
         test_interval: int = 1000,
         save_interval: int = 5000,
         bg_color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -61,6 +62,7 @@ class TrainingConfig:
         self.opacity_reset_interval = opacity_reset_interval
         self.sh_degree_increase_interval = sh_degree_increase_interval
         self.min_opacity = min_opacity
+        self.prune_opacity_from_iter = prune_opacity_from_iter
         self.test_interval = test_interval
         self.save_interval = save_interval
         self.bg_color = bg_color
@@ -194,17 +196,17 @@ class Trainer:
         # Backward
         loss.backward()
 
-        # Densification statistics
+        # Densification and pruning
         with torch.no_grad():
             if iteration < self.config.densify_until_iter:
                 # Track gradients for densification
-                # gsplat provides absgrad through meta when absgrad=True
                 absgrad = None
                 if output.meta is not None:
                     means2d = output.meta.get("means2d", None)
                     if means2d is not None and hasattr(means2d, "absgrad"):
                         absgrad = means2d.absgrad
 
+                # print(f"absgrad is none: {absgrad is None}")
                 self.model.add_densification_stats(
                     output.viewspace_points, output.radii.float(), absgrad=absgrad
                 )
@@ -214,16 +216,31 @@ class Trainer:
                     iteration >= self.config.densify_from_iter
                     and iteration % self.config.densification_interval == 0
                 ):
+                    num_before = self.model.num_gaussians
+
+                    # Don't prune by opacity until prune_opacity_from_iter
+                    effective_min_opacity = (
+                        self.config.min_opacity
+                        if iteration >= self.config.prune_opacity_from_iter
+                        else 0.0  # Disable opacity pruning early in training
+                    )
                     self.model.densify_and_prune(
                         grad_threshold=self.config.densify_grad_threshold,
-                        min_opacity=self.config.min_opacity,
+                        min_opacity=effective_min_opacity,
+                        max_screen_size=0,  # Disable screen size pruning
                     )
+
+                    num_after = self.model.num_gaussians
+                    if iteration % 500 == 0:
+                        print(f"\n[Densify] {num_before} -> {num_after} Gaussians")
+
                     # Recreate optimizer for new parameters
                     self._setup_optimizer()
 
-                # Opacity reset
+                # Opacity reset - skip if Gaussian count is too low
                 if iteration % self.config.opacity_reset_interval == 0:
-                    self.model.reset_opacity()
+                    if self.model.num_gaussians > 5000:  # Only reset if we have enough
+                        self.model.reset_opacity()
 
         # Optimizer step
         self.optimizer.step()
