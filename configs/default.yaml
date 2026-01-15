@@ -1,0 +1,54 @@
+# Default training configuration for FaceNet
+
+# Model
+model:
+  embedding_dim: 128
+  dropout_prob: 0.2
+
+# Training
+training:
+  epochs: 100
+  p_identities: 32
+  k_samples: 4
+  iterations_per_epoch: 1000
+  
+  # Optimizer
+  optimizer: sgd
+  learning_rate: 0.05
+  momentum: 0.9
+  weight_decay: 0.0005
+  
+  # LR Schedule
+  lr_decay_epochs: [30, 60, 80]
+  lr_decay_factor: 0.1
+  
+  # Regularization
+  gradient_clip: 1.0
+
+# Loss
+loss:
+  type: semihard  # Options: semihard, batch_hard, batch_all
+  margin: 0.2
+  squared: true
+
+# Data
+data:
+  image_size: 160
+  num_workers: 4
+  
+  # Augmentation
+  augmentation:
+    horizontal_flip: true
+    color_jitter: true
+    random_crop: true
+
+# Evaluation
+evaluation:
+  n_folds: 10
+  batch_size: 32
+
+# Checkpointing
+checkpointing:
+  save_interval: 5
+  save_dir: checkpoints
+  log_dir: logs

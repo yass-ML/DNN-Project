@@ -1,2 +1,6 @@
 
 my_scene/
+data/
+checkpoints/
+logs/
+venv/

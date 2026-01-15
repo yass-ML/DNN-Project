@@ -1,21 +1,23 @@
-# 3D Gaussian Splatting for Unity
-#
-# Core dependencies
-torch>=2.0
-torchvision
-numpy
-scipy
+# FaceNet Requirements
 
-# CUDA-accelerated Gaussian Splatting rasterizer
-gsplat>=1.0.0
-packaging  # Required by gsplat
+# Core ML
+torch>=2.0.0
+torchvision>=0.15.0
 
-# Progress and utilities  
-tqdm
+# Data handling
+Pillow>=10.0.0
+numpy>=1.24.0
 
-# Image processing
-opencv-python
-Pillow
+# Training utilities
+tqdm>=4.65.0
+tensorboard>=2.13.0
 
-# PLY file handling
-plyfile
+# Evaluation
+scikit-learn>=1.3.0
+
+# Configuration
+PyYAML>=6.0
+
+# Development (optional)
+matplotlib>=3.7.0
+seaborn>=0.12.0
