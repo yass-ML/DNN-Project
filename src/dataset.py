@@ -5,6 +5,7 @@ Implements identity-based sampling to facilitate online triplet mining.
 Uses P identities x K samples per identity per batch.
 """
 
+import csv
 import random
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Callable
@@ -283,15 +284,15 @@ class LFWPairsDataset(Dataset):
     """
     Dataset for LFW-style pair verification.
 
-    Expected format (pairs.txt):
-        # Matched pairs (same person)
-        person_name\timg1_num\timg2_num
-        # Mismatched pairs (different people)
-        person1_name\timg1_num\tperson2_name\timg2_num
+    Supports both tab-separated and CSV formats:
+        # CSV format (matched pairs):
+        name,imagenum1,imagenum2
+        # CSV format (mismatched pairs):
+        person1_name,img1_num,person2_name,img2_num
 
     Args:
         root: Root directory containing identity folders
-        pairs_file: Path to pairs.txt file
+        pairs_file: Path to pairs file (supports .txt, .csv)
         transform: Image transforms
     """
 
@@ -299,37 +300,62 @@ class LFWPairsDataset(Dataset):
         self, root: str, pairs_file: str, transform: Optional[Callable] = None
     ):
         self.root = Path(root)
-        self.pairs_file = Path(pairs_file)
+        # Support comma-separated list of files
+        self.pairs_files = [Path(p.strip()) for p in pairs_file.split(",")]
         self.transform = transform or get_transforms("eval")
 
         self.pairs: List[Tuple[str, str, int]] = []  # (img1, img2, same_person)
-        self._load_pairs()
+        for p_file in self.pairs_files:
+            self._load_pairs(p_file)
 
-    def _load_pairs(self):
-        """Load pairs from file."""
-        with open(self.pairs_file, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
+    def _load_pairs(self, pairs_file: Path):
+        """Load pairs from CSV or tab-separated file."""
+        if not pairs_file.exists():
+            print(f"Warning: Pairs file not found: {pairs_file}")
+            return
+
+        print(f"Loading pairs from {pairs_file}...")
+
+        # Detect delimiter by checking file extension or content
+        with open(pairs_file, "r") as f:
+            first_line = f.readline().strip()
+            delimiter = "," if "," in first_line else "\t"
+
+        with open(pairs_file, "r") as f:
+            reader = csv.reader(f, delimiter=delimiter)
+
+            for row_idx, row in enumerate(reader):
+                # Skip empty rows or comments
+                if not row or (row[0] and row[0].strip().startswith("#")):
                     continue
 
-                parts = line.split("\t")
+                # Clean whitespace and filter empty fields
+                row = [field.strip() for field in row if field.strip()]
 
-                if len(parts) == 3:
+                # Skip header row
+                if row_idx == 0:
+                    # Check if it's a header (contains 'name' or second column is not numeric)
+                    if "name" in row[0].lower() or (
+                        len(row) > 1
+                        and not row[1].replace(".", "").replace("-", "").isdigit()
+                    ):
+                        continue
+
+                if len(row) == 3:
                     # Same person: name, img1, img2
-                    name, n1, n2 = parts
+                    name, n1, n2 = row
                     img1 = self.root / name / f"{name}_{int(n1):04d}.jpg"
                     img2 = self.root / name / f"{name}_{int(n2):04d}.jpg"
                     self.pairs.append((str(img1), str(img2), 1))
 
-                elif len(parts) == 4:
+                elif len(row) == 4:
                     # Different people: name1, img1, name2, img2
-                    name1, n1, name2, n2 = parts
+                    name1, n1, name2, n2 = row
                     img1 = self.root / name1 / f"{name1}_{int(n1):04d}.jpg"
                     img2 = self.root / name2 / f"{name2}_{int(n2):04d}.jpg"
                     self.pairs.append((str(img1), str(img2), 0))
 
-        print(f"Loaded {len(self.pairs)} pairs")
+        print(f"Total pairs loaded: {len(self.pairs)}")
 
     def __len__(self) -> int:
         return len(self.pairs)

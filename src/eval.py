@@ -120,6 +120,11 @@ def compute_pair_embeddings(
         embeddings2.append(emb2.cpu().numpy())
         labels.append(same.numpy())
 
+    if len(embeddings1) == 0:
+        raise ValueError(
+            "No pairs were loaded. Check that your pairs file and data directory are correct."
+        )
+
     return np.vstack(embeddings1), np.vstack(embeddings2), np.concatenate(labels)
 
 

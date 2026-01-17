@@ -206,10 +206,19 @@ class IdentitySamplerOptimized(Sampler):
 
     def __iter__(self):
         """Generate batches of indices."""
-        for _ in range(self.num_iterations):
+        for iteration in range(self.num_iterations):
             batch_indices = []
             selected_identities = random.sample(
                 self.valid_identities, self.p_identities
+            )
+
+            # Log selected identities
+            identity_names = [
+                self.dataset.identity_to_name[identity]
+                for identity in selected_identities
+            ]
+            print(
+                f"Iteration {iteration + 1}/{self.num_iterations} - Selected {self.p_identities} identities: {identity_names[:5]}{'...' if len(identity_names) > 5 else ''}"
             )
 
             for identity in selected_identities:
