@@ -64,7 +64,7 @@ class LoadModelResponse(BaseModel):
 app = FastAPI(
     title="FaceNet API",
     description="Face recognition API using FaceNet embeddings",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Add CORS middleware
@@ -80,7 +80,7 @@ app.add_middleware(
 def load_image_from_upload(file: UploadFile) -> Image.Image:
     """Load PIL Image from uploaded file."""
     contents = file.file.read()
-    image = Image.open(io.BytesIO(contents)).convert('RGB')
+    image = Image.open(io.BytesIO(contents)).convert("RGB")
     return image
 
 
@@ -89,11 +89,9 @@ async def health_check():
     """Health check endpoint."""
     service = get_model_service()
     status = service.get_status()
-    
+
     return HealthResponse(
-        status="healthy",
-        model_loaded=status['model_loaded'],
-        device=status['device']
+        status="healthy", model_loaded=status["model_loaded"], device=status["device"]
     )
 
 
@@ -101,12 +99,14 @@ async def health_check():
 async def load_model(request: LoadModelRequest):
     """Load a model checkpoint."""
     service = get_model_service()
-    
+
     if not os.path.exists(request.model_path):
-        raise HTTPException(status_code=404, detail=f"Model not found: {request.model_path}")
-    
+        raise HTTPException(
+            status_code=404, detail=f"Model not found: {request.model_path}"
+        )
+
     success = service.load_model(request.model_path, request.threshold)
-    
+
     if success:
         return LoadModelResponse(success=True, message="Model loaded successfully")
     else:
@@ -117,68 +117,65 @@ async def load_model(request: LoadModelRequest):
 async def generate_embedding(image: UploadFile = File(...)):
     """
     Generate embedding for an uploaded face image.
-    
+
     Args:
         image: Face image file (JPEG, PNG)
-    
+
     Returns:
         128-dimensional L2-normalized embedding
     """
     service = get_model_service()
-    
+
     if not service.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     try:
         # Load image
         pil_image = load_image_from_upload(image)
-        
+
         # Generate embedding
         embedding = service.get_embedding(pil_image)
-        
+
         return EmbeddingResponse(
             embedding=embedding.tolist(),
             embedding_dim=len(embedding),
-            l2_norm=float(np.linalg.norm(embedding))
+            l2_norm=float(np.linalg.norm(embedding)),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/compare", response_model=ComparisonResponse)
-async def compare_faces(
-    image1: UploadFile = File(...),
-    image2: UploadFile = File(...)
-):
+async def compare_faces(image1: UploadFile = File(...), image2: UploadFile = File(...)):
     """
     Compare two face images.
-    
+
     Args:
         image1: First face image
         image2: Second face image
-    
+
     Returns:
         Comparison results including distance, similarity, and same person decision
     """
     service = get_model_service()
-    
+
     if not service.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     try:
         # Load images
         pil_image1 = load_image_from_upload(image1)
         pil_image2 = load_image_from_upload(image2)
-        
+
         # Compare faces
         result = service.compare_faces(pil_image1, pil_image2)
-        
+
         return ComparisonResponse(
-            distance=result['distance'],
-            similarity=result['similarity'],
-            is_same_person=result['is_same_person'],
-            confidence=result['confidence'],
-            threshold=result['threshold']
+            distance=result["distance"],
+            similarity=result["similarity"],
+            is_same_person=result["is_same_person"],
+            confidence=result["confidence"],
+            threshold=result["threshold"],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -201,12 +198,7 @@ async def get_status():
 
 def main():
     """Run the API server."""
-    uvicorn.run(
-        "app.backend.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    uvicorn.run("app.backend.main:app", host="0.0.0.0", port=8000, reload=True)
 
 
 if __name__ == "__main__":
