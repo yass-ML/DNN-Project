@@ -60,6 +60,22 @@ class LoadModelResponse(BaseModel):
     message: str
 
 
+class IdentityMatch(BaseModel):
+    identity: str
+    distance: float
+    similarity: float
+    is_match: bool
+    confidence: float
+    image_path: str
+    num_images: int
+
+
+class SearchResponse(BaseModel):
+    matches: list[IdentityMatch]
+    query_processed: bool
+    total_identities_searched: int
+
+
 # Create FastAPI app
 app = FastAPI(
     title="FaceNet API",
@@ -187,6 +203,101 @@ async def set_threshold(threshold: float = Form(...)):
     service = get_model_service()
     service.set_threshold(threshold)
     return {"success": True, "threshold": threshold}
+
+
+@app.post("/search", response_model=SearchResponse)
+async def search_identity(
+    image: UploadFile = File(...),
+    top_n: int = Form(default=5),
+    gallery_path: str = Form(default="data/scia_images"),
+):
+    """
+    Search for matching identities in a gallery.
+
+    Args:
+        image: Query face image
+        top_n: Number of top matches to return
+        gallery_path: Path to gallery directory with identity folders
+
+    Returns:
+        Top N matching identities with their similarity scores
+    """
+    service = get_model_service()
+
+    if not service.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    try:
+        # Load query image
+        pil_image = load_image_from_upload(image)
+
+        # Find top matches
+        matches = service.find_top_matches(
+            query_image=pil_image, gallery_dir=gallery_path, top_n=top_n
+        )
+
+        # Convert to response format
+        identity_matches = [
+            IdentityMatch(
+                identity=m["identity"],
+                distance=m["distance"],
+                similarity=m["similarity"],
+                is_match=m["is_match"],
+                confidence=m["confidence"],
+                image_path=m["image_path"],
+                num_images=m["num_images"],
+            )
+            for m in matches
+        ]
+
+        return SearchResponse(
+            matches=identity_matches,
+            query_processed=True,
+            total_identities_searched=len(matches),
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/identities")
+async def list_identities(gallery_path: str = "data/scia_images"):
+    """List all available identities in the gallery."""
+    gallery = Path(gallery_path)
+    if not gallery.exists():
+        raise HTTPException(
+            status_code=404, detail=f"Gallery not found: {gallery_path}"
+        )
+
+    identities = [
+        d.name for d in gallery.iterdir() if d.is_dir() and not d.name.startswith(".")
+    ]
+    return {"identities": sorted(identities), "count": len(identities)}
+
+
+@app.get("/identity/{identity_name}/images")
+async def get_identity_images(
+    identity_name: str, gallery_path: str = "data/scia_images"
+):
+    """Get image paths for a specific identity."""
+    identity_dir = Path(gallery_path) / identity_name
+    if not identity_dir.exists():
+        raise HTTPException(
+            status_code=404, detail=f"Identity not found: {identity_name}"
+        )
+
+    images = (
+        list(identity_dir.glob("*.jpg"))
+        + list(identity_dir.glob("*.jpeg"))
+        + list(identity_dir.glob("*.png"))
+    )
+
+    return {
+        "identity": identity_name,
+        "images": [str(p) for p in images],
+        "count": len(images),
+    }
 
 
 @app.get("/status")
